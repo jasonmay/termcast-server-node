@@ -8,6 +8,7 @@ var net  = require('net'),
 var app_sockets = {};
 var uuids       = {};
 var streams     = [];
+var termcast_sessions = {};
 
 var manager = net.createServer(function (socket) {
     socket.on('data', function(data) {
@@ -30,18 +31,37 @@ var manager = net.createServer(function (socket) {
 });
 
 var termcast = net.createServer(function (socket) {
+    var u;
+    socket.on('data', function(data) {
+        if (!termcast_sessions[u]) {
+            var words = data.toString('utf8').split(' ', 3);
+            socket.write('hello, ' + words[1] + "\n");
+            termcast_sessions[u].session_id = u;
+            termcast_sessions[u].user = words[1];
+        }
+        else {
+            for (var fd in app_sockets[u]) {
+                app_sockets[u][fd].write(data);
+            }
+        }
+    });
+
     temp.open('termcast', function(e, info) {
         if (e) throw e;
 
-        var u = uuid.generate();
+        u = uuid.generate();
         app_sockets[u] = {};
+        termcast_sessions[u] = {
+            socket: info.path,
+        };
 
         // termcast socket closing means no more unix sockets
         socket.on('close', function(had_error) {
-            for (var fd in app_sockets[u]) {
-                app_sockets[u][fd].close();
-            }
-            delete app_sockets[u];
+            socket.destroy();
+             for (var fd in app_sockets[u]) {
+                 app_sockets[u][fd].destroy();
+             }
+             delete app_sockets[u];
         });
 
         console.log(info.path);
@@ -52,13 +72,11 @@ var termcast = net.createServer(function (socket) {
 
         var stream = net.createServer(function (usocket) {
             app_sockets[u][usocket.fd] = usocket;
-            util.pump(socket, usocket);
             usocket.on('close', function(had_error) {
-                delete app_sockets[u][usocket.fd];
+                if (app_sockets[u]) delete app_sockets[u][usocket.fd];
             });
         });
         stream.listen(info.path);
-        streams.push(stream);
     });
 });
 
